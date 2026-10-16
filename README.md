@@ -92,16 +92,23 @@ This WASM component reads sensitive data from environment variables, which shoul
 
 ## Usage with NEAR OutLayer
 
-### Step 1: Store Secrets
+### Step 1: Publish the WASM
 
-First, store your API key and system prompt as encrypted secrets using the dashboard or CLI:
+```bash
+outlayer upload target/wasm32-wasip2/release/ai-example.wasm
+# prints SHA256 and: FastFS URL: https://test.fastfs.io/your-account.testnet/outlayer.testnet/<sha256>.wasm
+outlayer deploy ai-example <FastFS URL>
+```
+
+### Step 2: Store Secrets
+
+Store your API key and system prompt as encrypted secrets under the project, using the dashboard or CLI:
 
 **Option A: Using Dashboard** (Recommended)
 1. Open http://localhost:3000/secrets
 2. Connect your NEAR wallet
 3. Fill in the form:
-   - **Repo**: `github.com/your-username/ai-example`
-   - **Branch**: `main`
+   - **Project**: `your-account.testnet/ai-example`
    - **Profile**: `production`
    - **Secrets** (JSON):
      ```json
@@ -113,54 +120,34 @@ First, store your API key and system prompt as encrypted secrets using the dashb
    - **Access Condition**: Select who can use these secrets (e.g., AllowAll, Whitelist, NEAR balance check)
 4. Click "Encrypt & Store Secrets"
 
-**Option B: Using Python Script**
+**Option B: Using the CLI**
 ```bash
-cd keystore-worker
-
-# Create secrets JSON file
-cat > secrets.json << 'EOF'
-{
-  "OPENAI_API_KEY": "sk-proj-...",
-  "SYSTEM_PROMPT": "You are a helpful blockchain expert. Answer questions about NEAR Protocol concisely."
-}
-EOF
-
-# Encrypt secrets
-python3 encrypt_secrets.py secrets.json \
-  --repo "github.com/your-username/ai-example" \
-  --branch "main" \
-  --owner "your-account.testnet" \
-  --keystore-url "http://localhost:8080/secrets/pubkey"
-
-# This outputs an array like: [42,15,67,...]
-# Copy this array for the next step
+outlayer secrets set '{"OPENAI_API_KEY":"sk-proj-...","SYSTEM_PROMPT":"You are a helpful blockchain expert."}' \
+  --project your-account.testnet/ai-example --profile production
 ```
 
-**Option C: Store via NEAR CLI**
+**Option C: Store via NEAR CLI** (secrets already ECIES-encrypted to the keystore key)
 ```bash
-# Store encrypted secrets on contract
 near call outlayer.testnet store_secrets '{
-  "repo": "github.com/your-username/ai-example",
-  "branch": "main",
+  "accessor": { "Project": { "project_id": "your-account.testnet/ai-example" } },
   "profile": "production",
-  "encrypted_data": [42,15,67,...],
-  "access_condition": {"AllowAll": {}}
+  "encrypted_secrets_base64": "<ECIES-encrypted JSON>",
+  "access": "AllowAll",
+  "vault_id": null
 }' \
   --accountId your-account.testnet \
   --deposit 0.1
 ```
 
-### Step 2: Request Execution
+### Step 3: Request Execution
 
 Call `request_execution` on the OutLayer contract:
 
 **Simple execution (no secrets):**
 ```bash
 near call outlayer.testnet request_execution '{
-  "code_source": {
-    "repo": "https://github.com/your-username/ai-example",
-    "commit": "main",
-    "build_target": "wasm32-wasip2"
+  "source": {
+    "Project": { "project_id": "your-account.testnet/ai-example", "version_key": null }
   },
   "resource_limits": {
     "max_instructions": 500000000,
@@ -174,10 +161,8 @@ near call outlayer.testnet request_execution '{
 **With secrets (API key + system prompt):**
 ```bash
 near call outlayer.testnet request_execution '{
-  "code_source": {
-    "repo": "https://github.com/your-username/ai-example",
-    "commit": "main",
-    "build_target": "wasm32-wasip2"
+  "source": {
+    "Project": { "project_id": "your-account.testnet/ai-example", "version_key": null }
   },
   "secrets_ref": {
     "profile": "production",
@@ -195,10 +180,8 @@ near call outlayer.testnet request_execution '{
 **With conversation history:**
 ```bash
 near call outlayer.testnet request_execution '{
-  "code_source": {
-    "repo": "https://github.com/your-username/ai-example",
-    "commit": "main",
-    "build_target": "wasm32-wasip2"
+  "source": {
+    "Project": { "project_id": "your-account.testnet/ai-example", "version_key": null }
   },
   "secrets_ref": {
     "profile": "production",
@@ -213,14 +196,14 @@ near call outlayer.testnet request_execution '{
 }' --accountId your-account.testnet --deposit 0.1
 ```
 
-### Step 3: Worker Execution Flow
+### Step 4: Worker Execution Flow
 
 The worker will automatically:
-1. **Fetch secrets** from the contract (matching repo + branch + profile + owner)
+1. **Fetch secrets** from the contract (matching project + profile + owner)
 2. **Validate access** conditions via keystore
 3. **Decrypt secrets** via keystore (gets `OPENAI_API_KEY` and `SYSTEM_PROMPT`)
 4. **Inject into WASI environment** as environment variables
-5. **Compile WASM** (if not cached) in sandboxed Docker
+5. **Fetch the WASM** of the active version and check it against its sha256
 6. **Execute WASM** with wasmtime (WASI P2 + HTTP support)
 7. **Return AI response** as plain text
 8. **Submit result** back to NEAR contract
@@ -293,7 +276,7 @@ You can also use alternative OpenAI-compatible APIs:
 ## Troubleshooting
 
 **Error: OPENAI_API_KEY not found**
-- Make sure you stored secrets on contract with correct repo/branch/profile
+- Make sure you stored secrets on contract with correct project/profile
 - Verify `secrets_ref` in your `request_execution` call matches stored secrets
 - Check access conditions allow your account to decrypt
 
@@ -313,8 +296,7 @@ You can also use alternative OpenAI-compatible APIs:
 ## Notes
 
 - Requires wasmtime 28+ for execution (worker uses wasmtime 27)
-- HTTP requests require network access (allowed during execution, disabled during compilation)
-- Compilation happens in sandboxed Docker with `--network=none`
+- HTTP requests require network access (allowed during execution)
 - System prompt is **optional** - if not provided, OpenAI uses default behavior
 - Maximum recommended `max_tokens`: 4000 (to stay within instruction limits)
 
