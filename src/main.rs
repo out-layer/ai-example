@@ -9,8 +9,11 @@ struct Input {
     prompt: String,
     #[serde(default)]
     history: Vec<Message>,
-    #[serde(default = "default_endpoint")]
-    openai_endpoint: String,
+    /// Refused when present. The request carries `OPENAI_API_KEY` as a bearer
+    /// token, so its destination is the secret owner's to name (`OPENAI_ENDPOINT`):
+    /// an endpoint taken from the input hands the key to whoever runs the code.
+    #[serde(default)]
+    openai_endpoint: Option<serde_json::Value>,
     #[serde(default = "default_model")]
     model_name: String,
     #[serde(default = "default_max_tokens")]
@@ -61,6 +64,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Parse input JSON
     let input: Input = serde_json::from_str(&input_string)?;
 
+    if input.openai_endpoint.is_some() {
+        eprintln!(
+            "Error: openai_endpoint is not an input field. The endpoint is set by the owner of the \
+             secrets, as OPENAI_ENDPOINT next to OPENAI_API_KEY; remove openai_endpoint from the input."
+        );
+        std::process::exit(1);
+    }
+
     // Get API key from environment variable
     let api_key = match env::var("OPENAI_API_KEY") {
         Ok(key) => key,
@@ -69,6 +80,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             std::process::exit(1);
         }
     };
+
+    // The endpoint comes from the same secrets as the key, never from the input.
+    let endpoint = match env::var("OPENAI_ENDPOINT") {
+        Ok(url) if !url.trim().is_empty() => url.trim().to_string(),
+        _ => default_endpoint(),
+    };
+    if !endpoint.starts_with("https://") {
+        eprintln!("Error: OPENAI_ENDPOINT must be an https:// URL: the request carries the API key");
+        std::process::exit(1);
+    }
 
     // Build messages array
     let mut messages = Vec::new();
@@ -105,7 +126,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Make HTTPS request using wasi-http-client
     let response = Client::new()
-        .post(&input.openai_endpoint)
+        .post(&endpoint)
         .header("Content-Type", "application/json")
         .header("Authorization", format!("Bearer {}", api_key))
         .connect_timeout(Duration::from_secs(30))

@@ -10,7 +10,7 @@ Sends HTTP POST request to OpenAI-compatible API and returns the response. Demon
 
 **Key Features:**
 - Supports custom system prompts via environment variables (secrets)
-- Works with any OpenAI-compatible API endpoint
+- Works with any OpenAI-compatible API endpoint, named by the secrets' owner
 - Configurable model, max tokens, and conversation history
 - Secure API key management through encrypted secrets
 
@@ -23,7 +23,6 @@ Sends HTTP POST request to OpenAI-compatible API and returns the response. Demon
     {"role": "user", "content": "Previous question"},
     {"role": "assistant", "content": "Previous answer"}
   ],
-  "openai_endpoint": "https://api.openai.com/v1/chat/completions",
   "model_name": "gpt-3.5-turbo",
   "max_tokens": 150
 }
@@ -34,9 +33,13 @@ Sends HTTP POST request to OpenAI-compatible API and returns the response. Demon
 
 **Optional fields:**
 - `history` - Conversation history (array of messages, default: empty)
-- `openai_endpoint` - API endpoint URL (default: OpenAI)
 - `model_name` - Model name (default: "gpt-3.5-turbo")
 - `max_tokens` - Maximum tokens in response (default: 150)
+
+The endpoint is not an input field: an input carrying `openai_endpoint` is refused. The request
+carries `OPENAI_API_KEY` as a bearer token, so its destination is set by the owner of the secrets
+(`OPENAI_ENDPOINT`, below). An endpoint taken from the input would send the key to whoever runs
+the code.
 
 ## Output Format
 
@@ -81,6 +84,7 @@ This WASM component reads sensitive data from environment variables, which shoul
 - `OPENAI_API_KEY` - Your OpenAI API key (or compatible API key)
 
 ### Optional:
+- `OPENAI_ENDPOINT` - Chat-completions URL, `https://` only (default: `https://api.openai.com/v1/chat/completions`)
 - `SYSTEM_PROMPT` - Custom system prompt to control AI behavior
 
 **Example system prompts:**
@@ -221,7 +225,7 @@ Your WASM code automatically reads:
 - ✅ Works with OpenAI-compatible APIs
 - ✅ **Custom system prompts via `SYSTEM_PROMPT` environment variable**
 - ✅ Encrypted secrets management via NEAR OutLayer
-- ✅ Configurable API endpoint, model, and parameters
+- ✅ API endpoint set by the secrets' owner; model and parameters set per call
 - ✅ Conversation history support
 
 ## Security Model
@@ -260,18 +264,24 @@ Your WASM code automatically reads:
 
 ## Advanced Configuration
 
-You can also use alternative OpenAI-compatible APIs:
+Another OpenAI-compatible API is named in the secrets, next to its key:
+
+```json
+{
+  "OPENAI_API_KEY": "fw_...",
+  "OPENAI_ENDPOINT": "https://api.fireworks.ai/inference/v1/chat/completions"
+}
+```
+
+The call then names a model that endpoint serves:
 
 ```json
 {
   "prompt": "Explain NEAR Protocol",
-  "openai_endpoint": "https://api.anthropic.com/v1/messages",
-  "model_name": "claude-3-sonnet",
+  "model_name": "accounts/fireworks/models/gpt-oss-120b",
   "max_tokens": 500
 }
 ```
-
-**Note:** Make sure your API key matches the endpoint you're using.
 
 ## Troubleshooting
 
